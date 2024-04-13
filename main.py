@@ -8,6 +8,7 @@ import joblib
 import datetime as dt
 import pandas as pd
 import paho.mqtt.client as mqtt
+import RPi.GPIO as GPIO
 import time
 
 class FaceRecognition:
@@ -100,8 +101,8 @@ class FaceRecognition:
     def run(self):
         """ This method initializes the camera using OpenCv and invokes the recognize_faces(self, frame) 
         method in a while loop it runs continously until quit key(q) is pressed. The run() methold also 
-        contains the logic for opening the door or keeps it closed based on the recognition status of the person.
-        Contains a communication protocol to send names of the identified person to the broker."""
+        contains the logic for opening the door or keeping it closed based on the recognition status of the person.
+        Contains a communication protocol to send names and time of the identified person to the broker."""
         
         # turn on camera 
         cap = cv2.VideoCapture(0)
@@ -109,8 +110,16 @@ class FaceRecognition:
         # connect the client to the broker
         self.client.connect(self.broker_address)
 
-        # ideally keeps the door closed
-        door_status = False
+        GPIO.setmode(GPIO.BCM)
+
+        # Suppress warnings (optional)
+        GPIO.setwarnings(False)  
+
+        # Replace with your chosen GPIO pin
+        door_lock_pin = 17  
+
+        # ideally keep the door closed
+        GPIO.output(door_lock_pin, GPIO.LOW)  
 
         while True:
             ret, frame = cap.read()
@@ -120,13 +129,17 @@ class FaceRecognition:
 
             try:
                 if "unknown person" in self.predicted_names:
-                    door_status = False  # closes the door
+                    # Door remains closed
+                    GPIO.output(door_lock_pin, GPIO.LOW)  # Deactivate relay
                     message = "Person unrecognised, Entry denied"
                     self.client.publish(self.topic, message)
                     
                 else:
-                    door_status = True  # door opened
+                    # door openes
                     message = "Welcome! to Tlc Polymers Ltd."
+                    GPIO.output(door_lock_pin, GPIO.HIGH)  # Activate relay or MOSFET
+                    time.sleep(2)  # Set door unlock duration for 2 msec
+                    GPIO.output(door_lock_pin, GPIO.LOW)  # Deactivate relay
                     self.client.publish(self.topic, message)
 
             except KeyboardInterrupt:
