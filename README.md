@@ -9,13 +9,13 @@ visitors can press PUSH button to generate a manual request to enter into the pr
 <img src="images/biometric_device.png" alt="biometric_door_lock">
 
 ## LED indicators
-<img src="images/led_indicators.png" alt="biometric_door_lock">
+<img src="images/indicators.png" alt="biometric_door_lock">
 
 ## Advanced facial recognition
-1. Employs state-of-the-art deep learning models:
-2. MTCNN for robust face detection in various lighting conditions.
-3. Facenet for generating unique facial embeddings that capture a person's distinctive features.
-4. Random Forest Classifier for accurate person identification based on the extracted embeddings.
+Employs state-of-the-art deep learning models:
+1. MTCNN for robust face detection in various lighting conditions.
+2. Facenet for generating unique facial embeddings that capture a person's distinctive features.
+3. Random Forest Classifier for accurate person identification based on the extracted embeddings.
 
 ## Seamless Access Control
 1. Grants access to authorized personnel upon successful facial recognition, ensuring only authorized individuals can enter restricted areas.
