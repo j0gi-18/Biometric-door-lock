@@ -1,157 +1,171 @@
-import numpy as np
 import cv2
-import torch
-from facenet_pytorch import MTCNN
-from facenet_pytorch import InceptionResnetV1
+import numpy as np
+import tensorflow as tf
+import mediapipe as mp
 from sklearn.ensemble import RandomForestClassifier
 import joblib
 import datetime as dt
 import pandas as pd
 import paho.mqtt.client as mqtt
-import RPi.GPIO as GPIO
 import time
+import base64
+import os
+
+
+mp_solutions = mp.solutions
+
+# Load MobileFaceNet frozen graph
+def load_frozen_graph(pb_file_path):
+    with tf.io.gfile.GFile(pb_file_path, "rb") as f:
+        graph_def = tf.compat.v1.GraphDef()
+        graph_def.ParseFromString(f.read())
+
+    with tf.compat.v1.Graph().as_default() as graph:
+        tf.import_graph_def(graph_def, name="")
+    return graph
+
+graph = load_frozen_graph('/Users/sagarkumbhar/Documents/TLC_Polymers_Ltd./New Algo/MobileFaceNet_9925_9680.pb')
+input_tensor = graph.get_tensor_by_name("input:0")
+output_tensor = graph.get_tensor_by_name("embeddings:0")
+
+sess = tf.compat.v1.Session(graph=graph)
+
+face_detection = mp_solutions.face_detection.FaceDetection(min_detection_confidence=0.4)
+
+# Load pre-trained Random Forest classifier
+rf_classifier = joblib.load('/Users/sagarkumbhar/Documents/TLC_Polymers_Ltd./randomforest.joblib')
+mp_draw = mp.solutions.drawing_utils
+
+# Preprocessing function
+def preprocess_image(image):
+    if image.size == 0:
+        raise ValueError("Empty image provided for preprocessing.")
+    image = cv2.resize(image, (112, 112))
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image = np.expand_dims(image, axis=0)
+    image = image / 255.0  # Normalize the image
+    return image
+
+# Get face embedding function
+def get_face_embedding(face_image):
+    preprocessed_image = preprocess_image(face_image)
+    embedding = sess.run(output_tensor, feed_dict={input_tensor: preprocessed_image})
+    return embedding.flatten()
+
+# Recognize face function with confidence threshold
+def recognize_face(face_image, threshold=0.50):
+    embedding = get_face_embedding(face_image)
+    probabilities = rf_classifier.predict_proba([embedding])[0]
+    max_index = np.argmax(probabilities)
+    max_probability = probabilities[max_index]
+
+    if max_probability >= threshold:
+        return max_index, max_probability
+    else:
+        return None, None
 
 class FaceRecognition:
-    def __init__(self):
-        # Load models and resources
-        self.mtcnn = MTCNN(thresholds=[0.9, 0.9, 0.9])
-        self.facenet_model = InceptionResnetV1(pretrained='vggface2').eval()
-        self.clf = joblib.load("/Users/sagarkumbhar/Documents/TLC_Polymers_Ltd./classifiers/randomForest/randomforestClassifier.joblib")
-        self.label_to_name = {0: 'A39 Akash Khulpe',  1: 'A56 Anuj Gavhane', 2:'A50 Devang Edle', 3:'A51 Deepanshu Gadling', 
-                              4:'A45 Gaurav Diwedi', 5:'A41 Parimal Kumar', 6:'A40 Parth Deshpande',7:'A46 Rutuja Doiphode',
-                              8:'A47 Sagar Kumbhar'}
-        self.threshold = 0.7  
+    def __init__(self, broker_address="localhost"):
+        self.label_names = self.load_label_names('/Users/sagarkumbhar/Documents/TLC_Polymers_Ltd./Final/labels.txt')
         self.attendance_records = []
         self.predicted_names = []
-        self.broker_address = "localhost"
-        self.topic = "hello/world"
-        self.client = mqtt.Client()
-        
+        self.broker_address = broker_address
+        self.message_topic = "hello/world"
+        self.image_topic = "image/upload"
+        self.msg_client = mqtt.Client()
+        self.img_client = mqtt.Client()
+
+        # GPIO setup
+        wiringpi.wiringPiSetup()
+        wiringpi.pinMode(2, GPIO.OUTPUT)
+        wiringpi.pinMode(4, GPIO.INPUT)
+        wiringpi.digitalWrite(2, GPIO.HIGH)
+        wiringpi.pullUpDnControl(4, 2)
+
+    def load_label_names(self, filepath):
+        with open(filepath, 'r') as f:
+            return [line.strip() for line in f.readlines()]
 
     def recognize_faces(self, frame):
-        """ This method takes frames and performs face recognition by detecting faces through MTCNN.
-        The detected face area from the frames is fed to FaceNet and embeddings are extracted.
-        After sucessfull identification of people the name and entry time are stored in a pandas 
-        dataframe ans saved as a CSV file"""
-        
-        current_time = dt.datetime.now().strftime('%I: %M: %S %p')
-        boxes, _ = self.mtcnn.detect(frame) 
-        
-        # checks whether bounding boxes(faces) are present in the frames
-        if boxes is not None: 
-            faces = [] 
-            face_boxes = [] 
-            
-            for box in boxes: 
-                x1, y1, x2, y2 = box.astype(int) 
-                face = frame[y1:y2, x1:x2] 
+        current_time = dt.datetime.now().strftime('%I:%M:%S %p')
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = face_detection.process(rgb_frame)
+        if results.detections:
+            for detection in results.detections:
+                bboxC = detection.location_data.relative_bounding_box
+                ih, iw, _ = frame.shape
+                (x, y, w, h) = (int(bboxC.xmin * iw), int(bboxC.ymin * ih), 
+                                int(bboxC.width * iw), int(bboxC.height * ih))
                 
-                if face.size != 0: 
-                    face = cv2.resize(face, (160, 160)) 
-                    face = torch.from_numpy(face).permute(2, 0, 1).float() 
-                    face = (face - 127.5) / 128.0 
-                    faces.append(face) 
-                    face_boxes.append((x1, y1, x2, y2)) 
+                if x < 0 or y < 0 or x + w > iw or y + h > ih:
+                    continue  # Skip invalid bounding boxes
+                
+                face_image = frame[y:y+h, x:x+w]
+                
+                if face_image.size == 0:
+                    continue  # Skip empty face images
+                
+                prediction, probability = recognize_face(face_image)
+                
+                if prediction is not None:
+                    predicted_name = self.label_names[int(prediction)]
+                    current_date = dt.datetime.now().strftime('%d-%m-%y')
+                    if not any(record['Name'] == predicted_name for record in self.attendance_records):
+                        self.attendance_records.append({'Name': predicted_name, 'Date': current_date, 'Time': current_time})
+                    cv2.putText(frame, predicted_name, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                    self.predicted_names = [predicted_name]
+                else:
+                    cv2.putText(frame, "Unknown Person", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
+                    self.predicted_names = ["Unknown Person"]
                     
-            if len(faces) > 0:
-                # Convert faces list to a batch tensor
-                faces = torch.stack(faces)
-
-                # Generate embeddings for all faces in the batch
-                with torch.no_grad():
-                    embeddings = self.facenet_model(faces)
-
-                # Perform predictions on the embeddings
-                predictions = self.clf.predict(embeddings.numpy())
-                probabilities = self.clf.predict_proba(embeddings.numpy())
-
-                # Iterate over the predictions and draw bounding boxes
-                for prediction, probability, box in zip(predictions, probabilities, face_boxes):
-                    if probability.max() >= self.threshold:
-                        predicted_name = self.label_to_name[int(prediction)]
-                        #print("Predicted name:", predicted_name)
-                        current_date = dt.datetime.now().strftime('%d-%m-%y')
-                        current_confidence = probability.max()
                 
-                        if not any(record['Name'] == predicted_name for record in self.attendance_records):
-                            # Append attendance record to the list
-                            self.attendance_records.append({'Name': predicted_name, 'Date': current_date, 'Time': current_time})
-                
-                        #uncomment this to see probability/confidence of each class
-                        #print(probabilities)  
-                
-                        cv2.putText(frame, predicted_name, (box[0], box[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9,
-                                (36, 255, 12), 2)
-                        cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 2)
-                    else:
-                        cv2.putText(frame, 'unknown person', (box[0], box[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9,
-                                (36, 255, 12), 2)
-                        cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 2)
-                
-                    # Print all predicted names together
-                    self.predicted_names = [self.label_to_name[int(prediction)] if probability.max() >= self.threshold else 'unknown person' for prediction, probability in zip(predictions, probabilities)]
-                    #print("Predicted names:", predicted_names)
+            attendance_df = pd.DataFrame(self.attendance_records)
+            attendance_df.to_csv('attendance_records.csv', index=False)
 
-                    attendance_df = pd.DataFrame(self.attendance_records)
-
-                    # Save the DataFrame to a CSV file
-                    attendance_df.to_csv('attendance_records.csv', index=False)
-
-    
     def run(self):
-        """ This method initializes the camera using OpenCv and invokes the recognize_faces(self, frame) 
-        method in a while loop it runs continously until quit key(q) is pressed. The run() methold also 
-        contains the logic for opening the door or keeping it closed based on the recognition status of the person.
-        Contains a communication protocol to send names and time of the identified person to the broker."""
-        
-        # turn on camera 
+        button_status = wiringpi.digitalRead(4)
         cap = cv2.VideoCapture(0)
-        
-        # connect the client to the broker
-        self.client.connect(self.broker_address)
-
-        GPIO.setmode(GPIO.BCM)
-
-        # Suppress warnings (optional)
-        GPIO.setwarnings(False)  
-
-        # Replace with your chosen GPIO pin
-        door_lock_pin = 17  
-
-        # ideally keep the door closed
-        GPIO.output(door_lock_pin, GPIO.LOW)  
+        self.msg_client.connect(self.broker_address)
+        self.img_client.connect(self.broker_address, 1883, 60)
 
         while True:
             ret, frame = cap.read()
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            self.recognize_faces(frame)
-            print(self.predicted_names)
-
-            try:
-                if "unknown person" in self.predicted_names:
-                    # Door remains closed
-                    GPIO.output(door_lock_pin, GPIO.LOW)  # Deactivate relay
-                    message = "Person unrecognised, Entry denied"
-                    self.client.publish(self.topic, message)
-                    
-                else:
-                    # door openes
-                    message = "Welcome! to Tlc Polymers Ltd."
-                    GPIO.output(door_lock_pin, GPIO.HIGH)  # Activate relay or MOSFET
-                    time.sleep(2)  # Set door unlock duration for 2 msec
-                    GPIO.output(door_lock_pin, GPIO.LOW)  # Deactivate relay
-                    self.client.publish(self.topic, message)
-
-            except KeyboardInterrupt:
-                print("Exitining")
-            
-            cv2.imshow('frame', frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            if not ret:
                 break
+        
+            time.sleep(0.01)
+            key = cv2.waitKey(1) & 0xFF
+            self.recognize_faces(frame)
+            try:
+                if not self.predicted_names or "Unknown Person" in self.predicted_names:
+                    message = "Person unrecognised, Entry denied"
+                    self.msg_client.publish(self.message_topic, message)
+                else:
+                    predicted_name = self.predicted_names[0]
+                    message = f"Welcome {predicted_name}! to Tlc Polymers Ltd."
+                    self.msg_client.publish(self.message_topic, message)
+                    wiringpi.digitalWrite(2, GPIO.LOW)
+            except KeyboardInterrupt:
+                print("Exiting")
+        
+            cv2.imshow('Face Recognition', frame)
+            if key == ord('q'):
+                break
+
+            if button_status == 0:
+                filename = f"webcam_capture_{int(time.time())}.jpg"
+                cv2.imwrite(filename, frame)
+                with open(filename, "rb") as image_file:
+                    image_data = base64.b64encode(image_file.read())
+                    self.img_client.publish(self.image_topic, image_data)
+                    os.remove(filename)
+
         cap.release()
-        self.client.disconnect()
+        self.msg_client.disconnect()
+        self.img_client.disconnect()
         cv2.destroyAllWindows()
     
-# create an instance of the class 
 face_recognition = FaceRecognition()
 face_recognition.run()
