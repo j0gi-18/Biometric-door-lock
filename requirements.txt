@@ -1,8 +1,8 @@
-numpy==1.23.5
+numpy==1.26.4
 opencv-python==4.7.0.72
-torch==2.2.0
-torchvision==0.17.0
-facenet-pytorch==2.5.3
-scikit-learn==1.2.2
+tensorflow==2.17.0
+tflite-support==0.1.0a1
+mediapipe==0.10.14
+scikit-learn==1.5.1
 paho-mqtt==1.6.1
 pandas==2.1.4
