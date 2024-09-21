@@ -29,7 +29,7 @@ Employs state-of-the-art deep learning models:
 4. Developed backend Python with Django for robust server-side logic and database management
 5. Used REST API for frontend and backend communication
 
-<img src="images/frontend-backend_comm.png" alt="biometric_door_lock">
+<img src="images/fnb_comm.png" alt="biometric_door_lock">
 
 ## User Interface
 1. menu bar at the top contains options like "User info", "Alert log", "Request log", "My employee" etc which can be used by the admin.
