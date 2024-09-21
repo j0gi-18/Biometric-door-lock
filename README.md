@@ -11,7 +11,10 @@ visitors can press PUSH button to generate a manual request to enter into the pr
 ## LED indicators
 <img src="images/indicators.png" alt="biometric_door_lock">
 
-## Advanced facial recognition
+## Block Diagram
+<img src="images/block_diagram.png" alt="biometric_door_lock">
+
+## Advanced Facial Recognition
 Employs state-of-the-art deep learning models:
 1. MediaPipe for robust face detection in various lighting conditions.
 2. MobileFacenet for generating unique facial embeddings that capture a person's distinctive features.
