@@ -1,10 +1,6 @@
 import paho.mqtt.client as mqtt
 
-# Define broker address
-# broker_address = "192.168.137.209" (opi addrs)
-# mac adrs = 192.168.137.233
-
-#broker_address = "192.168.137.86"
+#add broker IP address
 broker_address = "localhost"
 
 # Define topic
