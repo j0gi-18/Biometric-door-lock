@@ -1,9 +1,7 @@
 # Biometric Door Lock System
 
 This project implements a secure and user-friendly biometric door lock system for restricted access control. 
-We leveraged the machine learning to achieve accurate facial recognition and streamlined access management through mobile and desktop applications.
-The door lock device contains a camera it can be a webcam or a 2 MP raspberry pi camera. three LED lights indicating the status of recognition and two buttons "PUSH" and "SOS" 
-visitors can press PUSH button to generate a manual request to enter into the premises, if the admin approves the request door opens else remains closed. or press SOS button to generate a alert notifactio to owner of the property in emergency.
+We leveraged machine learning to achieve accurate facial recognition and streamlined access management through mobile and desktop application. The face recognition algorithm contains Mediapipe for face detection, MobileFaceNet for face embedding extraction and Random Forest classifier for classification faces. Face recognition algorithm was implemented on a low cost OrangePi Zero 2W 4Gb varient and 12V Electro Magnetic door lock is also interfaced with the same via 5V single channel relay. The door lock device contains a 2 MP raspberry pi camera. Three LED lights indicating the status of face recognition and two buttons "PUSH" and "SOS". For registered users the face recognition algorithm can automatically open the door based on verification status but non registered user can also press PUSH button to generate a manual request to enter into the premises, if the admin approves the request door opens else remains closed. The SOS button is used to generate a alert notifaction to owner of the property in emergency.
 
 ## Biometric door lock device 
 <img src="images/biometric_device.png" alt="biometric_door_lock">
